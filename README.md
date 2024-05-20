@@ -54,6 +54,7 @@
     </li>
     <li><a href="#usage">Usage</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#structure">Structure</a></li>
     <li><a href="#contributing">Contributing</a></li>
     <li><a href="#license">License</a></li>
     <li><a href="#contact">Contact</a></li>
@@ -98,7 +99,7 @@ See the [open issues](https://github.com/KevenGe/YuqueTools/issues) for a full l
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-## Project Structure
+## Structure
 
 ```yaml
 YuqueTools:
