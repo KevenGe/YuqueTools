@@ -98,6 +98,17 @@ See the [open issues](https://github.com/KevenGe/YuqueTools/issues) for a full l
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
+## Project Structure
+
+```yaml
+YuqueTools:
+  - python-client-generated               # The swagger-codegen's Python result of yuque openapi
+  - READMD.md                             # READMD
+  - LICENSE                               # LICENSE
+  - .gitignore                            # .gitignore
+  - yuque_openapi_20240415[green].yml     # yuque openapi from [https://www.yuque.com/yuque/developer/openapi#U46ga]
+```
+
 <!-- CONTRIBUTING -->
 ## Contributing
 
