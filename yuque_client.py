@@ -1,8 +1,10 @@
 #
 import time
-from typing import cast, Any
+from typing import Callable, Optional, cast, Any
+from functools import partial
 
 #
+from click import Option
 from rich import print
 from rich.console import Console
 from rich.progress import Progress, TaskID
@@ -10,13 +12,25 @@ from rich.progress import Progress, TaskID
 #
 import swagger_client
 from swagger_client.rest import ApiException
-from swagger_client.models import InlineResponse200
+from swagger_client.models import (
+    InlineResponse200,
+    InlineResponse2001,
+    InlineResponse2007,
+    InlineResponse2008,
+    InlineResponse20012,
+    InlineResponse20014,
+    V2User,
+    V2Book,
+    V2BookDetail,
+    V2Doc,
+    V2DocDetail,
+)
 
 
 class YuqueClient:
     def __init__(self, token: str):
         configuration = swagger_client.Configuration()
-        configuration.api_key['X-Auth-Token'] = token
+        configuration.api_key["X-Auth-Token"] = token
         api_client = swagger_client.ApiClient(configuration)
 
         self.user_api_instance = swagger_client.UserApi(api_client)
@@ -39,35 +53,84 @@ class YuqueClient:
                 return
             self.console.log("Token Checked: [bold green]PASS[/bold green]")
 
-        # Get All REPOS and RUN
-        with Progress(console=self.console) as progress:
-            self.Repos_task_id = progress.add_task("REPOS Processing...", total=1000)
-            self.Repo_task_id = progress.add_task("REPO  Processing...", total=1000)
-            self.doc_task_id = progress.add_task("DOC   Processing...", total=1000)
+        # CHECK USER
+        user = self.run_user()
+        if user is None:
+            return
 
-            while not progress.finished:
-                progress.update(self.Repos_task_id, advance=0.5)
-                progress.update(self.Repo_task_id, advance=0.3)
-                progress.update(self.doc_task_id, advance=0.9)
-                time.sleep(0.02)
+        # repos
+        repos = self.run_repos(user.id)
+        if repos is None:
+            return
+
+        for repo in repos:
+            docs = self.run_docs(repo.id)
+            if docs is None:
+                continue
+
+            for doc in docs:
+                # print(doc)
+                print(doc.title)
+
+                doc_det = self.run_doc(repo.id, doc.id)
+                if doc_det is None:
+                    continue
+
+                print(doc_det.body)
+                with open("./docs/{}.md".format(doc.title), "a", encoding="utf-8") as f:
+                    f.write(doc_det.body)
+
+            break
+
+        # Get All REPOS and RUN
+        # with Progress(console=self.console) as progress:
+        #     self.Repos_task_id = progress.add_task("REPOS Processing...", total=1000)
+        #     self.Repo_task_id = progress.add_task("REPO  Processing...", total=1000)
+        #     self.doc_task_id = progress.add_task("DOC   Processing...", total=1000)
+
+        #     while not progress.finished:
+        #         progress.update(self.Repos_task_id, advance=0.5)
+        #         progress.update(self.Repo_task_id, advance=0.3)
+        #         progress.update(self.doc_task_id, advance=0.9)
+        #         time.sleep(0.02)
+
+    def run_with_limits_info(self, func: Callable[..., Any]) -> Optional[Any]:
+        api_responses = None
+        try:
+            api_responses = func(_return_http_data_only=False)
+        except ApiException as e:
+            self.console.log("ApiException Happened!")
+            self.console.log(e)
+        else:
+            ratelimit_limit: str = "Nan"
+            ratelimit_remain: str = "Nan"
+
+            if "X-RateLimit-Limit" in api_responses[2]:
+                ratelimit_limit = api_responses[2]["X-RateLimit-Limit"]
+
+            if "X-RateLimit-Remaining" in api_responses[2]:
+                ratelimit_remain = api_responses[2]["X-RateLimit-Remaining"]
+
+            self.console.log(
+                "RateLimit: {0} / {1}".format(ratelimit_remain, ratelimit_limit)
+            )
+
+        if api_responses is None:
+            return None
+
+        return api_responses[0]
 
     def run_hello(self) -> bool:
         """
         测试token是否可行
         :return:
         """
-        api_responses = None
 
-        try:
-            # 心跳
-            api_responses = self.user_api_instance.user_api_v2_hello_with_http_info(_return_http_data_only=False)
-            if api_responses[1] != 200:
-                raise Exception("Check token failed")
-        except ApiException as e:
-            print("Exception when calling UserApi->user_api_v2_hello: %s\n" % e)
+        res = self.run_with_limits_info(
+            self.user_api_instance.user_api_v2_hello_with_http_info
+        )
 
-        api_responses = cast(tuple[InlineResponse200, int, Any], api_responses)
-        if api_responses[1] != 200:
+        if res is None:
             return False
         return True
 
@@ -76,24 +139,88 @@ class YuqueClient:
         获取个人信息
         :return:
         """
-        pass
+        res = self.run_with_limits_info(
+            self.user_api_instance.user_api_v2_user_info_with_http_info
+        )
 
-    def run_repos(self):
-        pass
+        if res is None:
+            return None
 
-    def run_repo(self):
+        res = cast(InlineResponse2001, res)
+        user = cast(V2User, res.data)
+
+        self.console.log("User: {}".format(user.name))
+        self.console.log(user)
+
+        return user
+
+    def run_repos(self, login):
+        res = self.run_with_limits_info(
+            partial(
+                self.repo_api_instance.repo_api_v2_repo_list_with_http_info, login=login
+            )
+        )
+
+        if res is None:
+            return None
+
+        res = cast(InlineResponse20012, res)
+        books = cast(list[V2Book], res.data)
+        return books
+
+    def run_repo(self, book_id):
         """
         获取仓库的相关信息，并留有数据给doc，调用run_doc
         :return:
         """
-        pass
+        res = self.run_with_limits_info(
+            partial(
+                self.repo_api_instance.repo_api_v2_repo_show_by_id_with_http_info,
+                book_id=book_id,
+            )
+        )
 
-    def run_doc(self):
+        if res is None:
+            return None
+
+        res = cast(InlineResponse20014, res)
+        book = cast(V2BookDetail, res.data)
+        return book
+
+    def run_docs(self, book_id):
+        res = self.run_with_limits_info(
+            partial(
+                self.doc_api_instance.doc_api_v2_doc_list_by_id_with_http_info,
+                book_id=book_id,
+            )
+        )
+
+        if res is None:
+            return None
+
+        res = cast(InlineResponse2007, res)
+        docs = cast(list[V2Doc], res.data)
+        return docs
+
+    def run_doc(self, book_id, id):
         """
         获取文档的相关信息，并执行文档的格式转化，以及图片等资源文件的下载等等
         :return:
         """
-        pass
+        res = self.run_with_limits_info(
+            partial(
+                self.doc_api_instance.doc_api_v2_doc_show_by_id_with_http_info,
+                book_id=book_id,
+                id=id,
+            )
+        )
+
+        if res is None:
+            return None
+
+        res = cast(InlineResponse2008, res)
+        doc = cast(V2DocDetail, res.data)
+        return doc
 
     def run_element(self):
         """
