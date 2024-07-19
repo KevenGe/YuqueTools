@@ -34,11 +34,13 @@ from swagger_client.models import (
 def _replace_invalid_chars(path):
     # 定义一个字典，将不允许出现在Windows路径中的字符映射到替换字符
     invalid_chars = {
+        ".": "_",
         "<": "_",
         ">": "_",
         ":": "_",
         '"': "_",
         "/": "_",
+        "\n": "_",
         "\\": "_",
         "|": "_",
         "?": "_",
@@ -114,18 +116,21 @@ class YuqueClient:
 
         # Get All REPOS and RUN
         with Progress(console=self.console, transient=True) as progress:
+            Repos_task_id = progress.add_task("REPOS Processing...", total=0)
+            Repo_task_id = progress.add_task("REPO  Processing...", total=0)
+            
             # repos
             repos = self.run_repos(user.id)
             if repos is None:
                 return
 
-            Repos_task_id = progress.add_task("REPOS Processing...", total=len(repos))
+            progress.update(Repos_task_id, total=len(repos))
             for repo in repos:
                 docs = self.run_docs(repo.id)
                 if docs is None:
                     continue
 
-                Repo_task_id = progress.add_task("REPO  Processing...", total=len(docs))
+                progress.update(Repo_task_id, total=len(docs), completed=0)
                 for doc in docs:
                     doc_det = self.run_doc(repo.id, doc.id)
                     if doc_det is None:
@@ -148,8 +153,8 @@ class YuqueClient:
                         "Saved Doc: {}".format("{0}/{1}.md".format(repo_dir, doc.title))
                     )
                     progress.advance(Repo_task_id)
-
                 progress.advance(Repos_task_id)
+            progress.stop_task(Repos_task_id)
 
     def run_with_limits_info(self, func: partial) -> Optional[Any]:
         api_responses = None
@@ -163,6 +168,9 @@ class YuqueClient:
             api_responses = func(_return_http_data_only=False)
         except ApiException as e:
             self.console.log("ApiException Happened!")
+            self.console.log(e)
+        except Exception as e:
+            self.console.log("Exception Happened!")
             self.console.log(e)
         else:
             ratelimit_limit: str = "Nan"
