@@ -1,8 +1,11 @@
 #
+import re
 import time
 from pathlib import Path
 from typing import Callable, Optional, cast, Any
-from functools import partial
+from functools import cache, partial
+import json
+import pickle
 
 #
 from click import Option
@@ -28,6 +31,58 @@ from swagger_client.models import (
 )
 
 
+def _replace_invalid_chars(path):
+    # 定义一个字典，将不允许出现在Windows路径中的字符映射到替换字符
+    invalid_chars = {
+        "<": "_",
+        ">": "_",
+        ":": "_",
+        '"': "_",
+        "/": "_",
+        "\\": "_",
+        "|": "_",
+        "?": "_",
+        "*": "_",
+    }
+
+    # 使用正则表达式替换非法字符
+    pattern = re.compile("|".join([re.escape(k) for k in invalid_chars.keys()]))
+    result = pattern.sub(lambda x: invalid_chars[x.group(0)], path)
+
+    return result
+
+
+class RequestCache:
+    def __init__(self, cache_dir: Path) -> None:
+        if not cache_dir.exists():
+            cache_dir.mkdir(parents=True)
+        self.cache_dir = cache_dir
+
+        self.cache_keys = set()
+        for file in cache_dir.glob("*"):
+            self.cache_keys.add(file.stem)
+
+    def request(self, func: partial) -> Optional[Any]:
+        key = self._parse_func_to_str(func)
+        if key not in self.cache_keys:
+            return None
+
+        with open(self.cache_dir / (key + ".pkl"), "rb") as f:
+            res = pickle.load(f)
+        return res
+
+    def add_cache(self, func: partial, data: Any):
+        key = self._parse_func_to_str(func)
+        with open(self.cache_dir / (key + ".pkl"), "wb") as f:
+            pickle.dump(data, f)
+        self.cache_keys.add(key)
+
+    def _parse_func_to_str(self, func: partial) -> str:
+        return _replace_invalid_chars(
+            f"{func.func.__name__}_{func.args}_{func.keywords}"
+        )
+
+
 class YuqueClient:
     def __init__(self, token: str):
         configuration = swagger_client.Configuration()
@@ -41,9 +96,7 @@ class YuqueClient:
         self.console = Console()
         self.console.log("Token = [bold green]{}[/bold green]".format(token))
 
-        self.Repos_task_id = TaskID(-1)
-        self.Repo_task_id = TaskID(-1)
-        self.doc_task_id = TaskID(-1)
+        self.request_cache = RequestCache(Path(".cache"))
 
     def run(self):
         # CHECK if the TOKEN IS AVAILABLE
@@ -78,12 +131,14 @@ class YuqueClient:
                     if doc_det is None:
                         continue
 
-                    repo_dir = Path("./docs/{0}/".format(repo.name))
+                    repo_dir = Path("./tmp/docs/{0}/".format(repo.name))
                     if not repo_dir.exists():
                         repo_dir.mkdir(parents=True)
 
                     with open(
-                        "{0}/{1}.md".format(repo_dir, doc.title),
+                        "{0}/{1}.md".format(
+                            repo_dir, _replace_invalid_chars(doc.title)
+                        ),
                         "w",
                         encoding="utf-8",
                     ) as f:
@@ -96,8 +151,14 @@ class YuqueClient:
 
                 progress.advance(Repos_task_id)
 
-    def run_with_limits_info(self, func: Callable[..., Any]) -> Optional[Any]:
+    def run_with_limits_info(self, func: partial) -> Optional[Any]:
         api_responses = None
+
+        api_responses = self.request_cache.request(func)
+        if api_responses is not None:
+            self.console.log("use cache")
+            return api_responses
+
         try:
             api_responses = func(_return_http_data_only=False)
         except ApiException as e:
@@ -117,10 +178,11 @@ class YuqueClient:
                 "RateLimit: {0} / {1}".format(ratelimit_remain, ratelimit_limit)
             )
 
-        if api_responses is None:
-            return None
+        if api_responses is not None:
+            self.request_cache.add_cache(func, api_responses[0])
+            return api_responses[0]
 
-        return api_responses[0]
+        return None
 
     def run_hello(self) -> bool:
         """
@@ -129,7 +191,7 @@ class YuqueClient:
         """
 
         res = self.run_with_limits_info(
-            self.user_api_instance.user_api_v2_hello_with_http_info
+            partial(self.user_api_instance.user_api_v2_hello_with_http_info)
         )
 
         if res is None:
@@ -142,7 +204,7 @@ class YuqueClient:
         :return:
         """
         res = self.run_with_limits_info(
-            self.user_api_instance.user_api_v2_user_info_with_http_info
+            partial(self.user_api_instance.user_api_v2_user_info_with_http_info)
         )
 
         if res is None:
