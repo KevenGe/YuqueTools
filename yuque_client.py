@@ -1,5 +1,6 @@
 #
 import time
+from pathlib import Path
 from typing import Callable, Optional, cast, Any
 from functools import partial
 
@@ -58,41 +59,42 @@ class YuqueClient:
         if user is None:
             return
 
-        # repos
-        repos = self.run_repos(user.id)
-        if repos is None:
-            return
+        # Get All REPOS and RUN
+        with Progress(console=self.console, transient=True) as progress:
+            # repos
+            repos = self.run_repos(user.id)
+            if repos is None:
+                return
 
-        for repo in repos:
-            docs = self.run_docs(repo.id)
-            if docs is None:
-                continue
-
-            for doc in docs:
-                # print(doc)
-                print(doc.title)
-
-                doc_det = self.run_doc(repo.id, doc.id)
-                if doc_det is None:
+            Repos_task_id = progress.add_task("REPOS Processing...", total=len(repos))
+            for repo in repos:
+                docs = self.run_docs(repo.id)
+                if docs is None:
                     continue
 
-                print(doc_det.body)
-                with open("./docs/{}.md".format(doc.title), "a", encoding="utf-8") as f:
-                    f.write(doc_det.body)
+                Repo_task_id = progress.add_task("REPO  Processing...", total=len(docs))
+                for doc in docs:
+                    doc_det = self.run_doc(repo.id, doc.id)
+                    if doc_det is None:
+                        continue
 
-            break
+                    repo_dir = Path("./docs/{0}/".format(repo.name))
+                    if not repo_dir.exists():
+                        repo_dir.mkdir(parents=True)
 
-        # Get All REPOS and RUN
-        # with Progress(console=self.console) as progress:
-        #     self.Repos_task_id = progress.add_task("REPOS Processing...", total=1000)
-        #     self.Repo_task_id = progress.add_task("REPO  Processing...", total=1000)
-        #     self.doc_task_id = progress.add_task("DOC   Processing...", total=1000)
+                    with open(
+                        "{0}/{1}.md".format(repo_dir, doc.title),
+                        "w",
+                        encoding="utf-8",
+                    ) as f:
+                        f.write(doc_det.body)
 
-        #     while not progress.finished:
-        #         progress.update(self.Repos_task_id, advance=0.5)
-        #         progress.update(self.Repo_task_id, advance=0.3)
-        #         progress.update(self.doc_task_id, advance=0.9)
-        #         time.sleep(0.02)
+                    progress.log(
+                        "Saved Doc: {}".format("{0}/{1}.md".format(repo_dir, doc.title))
+                    )
+                    progress.advance(Repo_task_id)
+
+                progress.advance(Repos_task_id)
 
     def run_with_limits_info(self, func: Callable[..., Any]) -> Optional[Any]:
         api_responses = None
@@ -221,10 +223,3 @@ class YuqueClient:
         res = cast(InlineResponse2008, res)
         doc = cast(V2DocDetail, res.data)
         return doc
-
-    def run_element(self):
-        """
-        进行文档元素的转化
-        :return:
-        """
-        pass
